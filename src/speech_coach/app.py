@@ -4,13 +4,15 @@ import queue
 import signal
 import threading
 import time
+from collections import deque
+from concurrent.futures import Future
 from typing import NoReturn
 
 from .audio import AudioSegmenter
 from .config import Settings
 from .models import AppState, TranscriptTurn
 from .playbook import Playbook
-from .suggestions import SuggestionEngine
+from .suggestions import InstantSuggestionEngine, LLMRefinementEngine
 from .transcriber import LocalFasterWhisperTranscriber
 from .ui import TerminalUI
 
@@ -26,17 +28,29 @@ class SpeechCoachApp:
             device=self.settings.whisper_device,
             compute_type=self.settings.whisper_compute_type,
         )
-        self.suggestion_engine = SuggestionEngine(
+        self.instant_engine = InstantSuggestionEngine(max_suggestions=self.settings.max_suggestions)
+        self.llm_refiner = LLMRefinementEngine(
             api_key=self.settings.openai_api_key,
             model=self.settings.openai_model,
             max_suggestions=self.settings.max_suggestions,
         )
         self.utterance_queue: "queue.Queue[bytes]" = queue.Queue()
-        self.segmenter = AudioSegmenter(self.settings, self._enqueue_utterance)
+        self.frame_queue: "queue.Queue[tuple[bytes, bool]]" = queue.Queue()
+        self.segmenter = AudioSegmenter(
+            self.settings,
+            self._enqueue_utterance,
+            on_frame=self._enqueue_frame,
+        )
         self.running = False
+        self.request_lock = threading.Lock()
+        self.current_request_id = 0
+        self.current_llm_future: Future[tuple[list[str], str]] | None = None
 
     def _enqueue_utterance(self, utterance: bytes) -> None:
         self.utterance_queue.put(utterance)
+
+    def _enqueue_frame(self, frame: bytes, is_speech: bool) -> None:
+        self.frame_queue.put((frame, is_speech))
 
     def start(self) -> None:
         if not self.settings.openai_api_key:
@@ -48,7 +62,8 @@ class SpeechCoachApp:
         self.ui.update(self.state)
 
         self.segmenter.start()
-        threading.Thread(target=self._worker_loop, daemon=True).start()
+        threading.Thread(target=self._partial_loop, daemon=True).start()
+        threading.Thread(target=self._final_loop, daemon=True).start()
 
         def stop_handler(signum, frame) -> None:
             del signum, frame
@@ -63,33 +78,97 @@ class SpeechCoachApp:
 
         self.ui.stop()
 
-    def _worker_loop(self) -> None:
+    def _partial_loop(self) -> None:
+        rolling_frames: deque[bytes] = deque(maxlen=self.settings.partial_window_frames)
+        last_emit = 0.0
+
+        while self.running:
+            frame, is_speech = self.frame_queue.get()
+            if not is_speech:
+                continue
+
+            rolling_frames.append(frame)
+            now = time.time()
+            if (now - last_emit) * 1000 < self.settings.partial_update_ms:
+                continue
+            if len(rolling_frames) < max(2, self.settings.min_utterance_frames // 2):
+                continue
+
+            last_emit = now
+            pcm = b"".join(rolling_frames)
+            partial_text = self.transcriber.transcribe_pcm16(pcm, self.settings.sample_rate).strip()
+            if not partial_text:
+                continue
+
+            self.state.partial_text = partial_text
+            playbook_hits = self.playbook.retrieve(partial_text, limit=3)
+            suggestions, reason = self.instant_engine.suggest(partial_text, playbook_hits)
+            self.state.latest_suggestions = suggestions
+            self.state.latest_reason = reason
+            self.state.suggestion_source = "local"
+            self.state.status = "listening"
+            self._cancel_stale_llm()
+
+    def _final_loop(self) -> None:
         while self.running:
             utterance = self.utterance_queue.get()
             self.state.status = "transcribing"
             self.ui.update(self.state)
 
-            text = self.transcriber.transcribe_pcm16(utterance, self.settings.sample_rate)
-            text = text.strip()
+            text = self.transcriber.transcribe_pcm16(utterance, self.settings.sample_rate).strip()
             if not text:
                 self.state.status = "listening"
                 continue
 
             self.state.transcript.append(TranscriptTurn(speaker="user", text=text))
             self.state.partial_text = ""
-            self.state.status = "thinking"
+            relevant = self.playbook.retrieve(text, limit=4)
+
+            local_suggestions, local_reason = self.instant_engine.suggest(text, relevant)
+            self.state.latest_suggestions = local_suggestions
+            self.state.latest_reason = local_reason
+            self.state.suggestion_source = "local"
+            self.state.status = "refining"
             self.ui.update(self.state)
 
-            relevant = self.playbook.retrieve(text, limit=4)
-            suggestions, reason = self.suggestion_engine.suggest(
-                transcript=self.state.transcript[-self.settings.max_history_turns :],
-                latest_text=text,
-                playbook_entries=relevant,
-            )
+            self._schedule_llm_refinement(text, relevant, local_suggestions)
+
+    def _cancel_stale_llm(self) -> None:
+        with self.request_lock:
+            self.current_request_id += 1
+            if self.current_llm_future and not self.current_llm_future.done():
+                self.current_llm_future.cancel()
+
+    def _schedule_llm_refinement(
+        self,
+        latest_text: str,
+        relevant,
+        local_suggestions: list[str],
+    ) -> None:
+        time.sleep(self.settings.llm_debounce_ms / 1000)
+        with self.request_lock:
+            self.current_request_id += 1
+            request_id = self.current_request_id
+            if self.current_llm_future and not self.current_llm_future.done():
+                self.current_llm_future.cancel()
+            transcript_slice = self.state.transcript[-self.settings.max_history_turns :]
+            future = self.llm_refiner.suggest_async(transcript_slice, latest_text, relevant, local_suggestions)
+            self.current_llm_future = future
+
+        def apply_result() -> None:
+            try:
+                suggestions, reason = future.result()
+            except Exception:
+                return
+            with self.request_lock:
+                if request_id != self.current_request_id:
+                    return
             self.state.latest_suggestions = suggestions
             self.state.latest_reason = reason
+            self.state.suggestion_source = "ai-refined"
             self.state.status = "listening"
-            self.ui.update(self.state)
+
+        threading.Thread(target=apply_result, daemon=True).start()
 
 
 def main() -> NoReturn:

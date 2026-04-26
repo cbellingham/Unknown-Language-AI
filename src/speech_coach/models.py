@@ -25,4 +25,5 @@ class AppState:
     transcript: List[TranscriptTurn] = field(default_factory=list)
     latest_suggestions: list[str] = field(default_factory=list)
     latest_reason: str = ""
+    suggestion_source: str = "none"
     status: str = "starting"

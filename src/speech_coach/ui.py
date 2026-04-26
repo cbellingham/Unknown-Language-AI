@@ -15,7 +15,7 @@ class TerminalUI:
         self.live: Live | None = None
 
     def start(self) -> None:
-        self.live = Live(self.render(AppState()), refresh_per_second=4, console=self.console)
+        self.live = Live(self.render(AppState()), refresh_per_second=8, console=self.console)
         self.live.start()
 
     def stop(self) -> None:
@@ -40,6 +40,7 @@ class TerminalUI:
 
         suggestions = Text()
         if state.latest_suggestions:
+            suggestions.append(f"Source: {state.suggestion_source or 'unknown'}\n\n")
             for idx, item in enumerate(state.latest_suggestions, start=1):
                 suggestions.append(f"{idx}. {item}\n")
         else:

@@ -19,8 +19,10 @@ class Settings:
     vad_aggressiveness: int = int(os.getenv("VAD_AGGRESSIVENESS", "2"))
     min_utterance_ms: int = int(os.getenv("MIN_UTTERANCE_MS", "500"))
     max_silence_ms: int = int(os.getenv("MAX_SILENCE_MS", "500"))
-    partial_window_ms: int = int(os.getenv("PARTIAL_WINDOW_MS", "800"))
-    max_history_turns: int = int(os.getenv("MAX_HISTORY_TURNS", "12"))
+    partial_window_ms: int = int(os.getenv("PARTIAL_WINDOW_MS", "900"))
+    partial_update_ms: int = int(os.getenv("PARTIAL_UPDATE_MS", "180"))
+    llm_debounce_ms: int = int(os.getenv("LLM_DEBOUNCE_MS", "150"))
+    max_history_turns: int = int(os.getenv("MAX_HISTORY_TURNS", "10"))
     max_suggestions: int = int(os.getenv("MAX_SUGGESTIONS", "3"))
     whisper_model_size: str = os.getenv("WHISPER_MODEL_SIZE", "base.en")
     whisper_device: str = os.getenv("WHISPER_DEVICE", "cpu")
@@ -38,3 +40,7 @@ class Settings:
     @property
     def max_silence_frames(self) -> int:
         return max(1, self.max_silence_ms // self.frame_ms)
+
+    @property
+    def partial_window_frames(self) -> int:
+        return max(1, self.partial_window_ms // self.frame_ms)

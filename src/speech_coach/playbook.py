@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections import defaultdict
 from pathlib import Path
 
 from .models import PlaybookEntry
@@ -9,12 +10,21 @@ from .models import PlaybookEntry
 class Playbook:
     def __init__(self, entries: list[PlaybookEntry]) -> None:
         self.entries = entries
+        self.keyword_index = self._build_keyword_index(entries)
 
     @classmethod
     def from_json(cls, path: Path) -> "Playbook":
         raw = json.loads(path.read_text(encoding="utf-8"))
         entries = [PlaybookEntry(**item) for item in raw]
         return cls(entries)
+
+    @staticmethod
+    def _build_keyword_index(entries: list[PlaybookEntry]) -> dict[str, list[PlaybookEntry]]:
+        index: dict[str, list[PlaybookEntry]] = defaultdict(list)
+        for entry in entries:
+            for keyword in entry.keywords:
+                index[keyword.lower()].append(entry)
+        return dict(index)
 
     def retrieve(self, text: str, limit: int = 4) -> list[PlaybookEntry]:
         haystack = text.lower()

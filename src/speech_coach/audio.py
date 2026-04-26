@@ -19,9 +19,15 @@ class SegmenterState:
 
 
 class AudioSegmenter:
-    def __init__(self, settings: Settings, on_utterance: Callable[[bytes], None]) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        on_utterance: Callable[[bytes], None],
+        on_frame: Callable[[bytes, bool], None] | None = None,
+    ) -> None:
         self.settings = settings
         self.on_utterance = on_utterance
+        self.on_frame = on_frame
         self.audio_queue: "queue.Queue[bytes]" = queue.Queue()
         self.vad = webrtcvad.Vad(settings.vad_aggressiveness)
         self.running = False
@@ -56,6 +62,8 @@ class AudioSegmenter:
         while self.running:
             frame = self.audio_queue.get()
             is_speech = self.vad.is_speech(frame, self.settings.sample_rate)
+            if self.on_frame is not None:
+                self.on_frame(frame, is_speech)
 
             if is_speech:
                 state.speech_frames.append(frame)

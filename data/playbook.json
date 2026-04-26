@@ -1,0 +1,37 @@
+[
+  {
+    "id": "general-opener",
+    "title": "General opener",
+    "tags": ["general", "opening"],
+    "text": "That makes sense — what matters most to you here?",
+    "keywords": ["start", "opening", "conversation", "general"]
+  },
+  {
+    "id": "clarify-confusion",
+    "title": "Clarify confusion",
+    "tags": ["clarification", "objection"],
+    "text": "Let me clarify the part that usually causes confusion.",
+    "keywords": ["confused", "unclear", "clarify", "explain"]
+  },
+  {
+    "id": "offer-walkthrough",
+    "title": "Offer walkthrough",
+    "tags": ["interest", "product"],
+    "text": "Would it help if I walk through the options briefly?",
+    "keywords": ["interested", "options", "walkthrough", "explain"]
+  },
+  {
+    "id": "price-objection",
+    "title": "Price objection",
+    "tags": ["pricing", "objection"],
+    "text": "I understand — what are you comparing it against right now?",
+    "keywords": ["expensive", "price", "cost", "budget"]
+  },
+  {
+    "id": "thinking-it-over",
+    "title": "Need to think",
+    "tags": ["hesitation", "decision"],
+    "text": "Of course — what information would help you decide with confidence?",
+    "keywords": ["think", "later", "decide", "hesitate"]
+  }
+]

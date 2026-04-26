@@ -1,0 +1,12 @@
+Metadata-Version: 2.4
+Name: realtime-speech-coach
+Version: 0.1.0
+Summary: Realtime speech coach with transcription and AI suggestions
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: openai>=1.30.0
+Requires-Dist: sounddevice>=0.4.6
+Requires-Dist: numpy>=1.26.0
+Requires-Dist: python-dotenv>=1.0.1
+Requires-Dist: webrtcvad-wheels>=2.0.14
+Requires-Dist: faster-whisper>=1.0.3

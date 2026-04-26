@@ -1,0 +1,15 @@
+pyproject.toml
+src/realtime_speech_coach.egg-info/PKG-INFO
+src/realtime_speech_coach.egg-info/SOURCES.txt
+src/realtime_speech_coach.egg-info/dependency_links.txt
+src/realtime_speech_coach.egg-info/requires.txt
+src/realtime_speech_coach.egg-info/top_level.txt
+src/speech_coach/__init__.py
+src/speech_coach/app.py
+src/speech_coach/audio.py
+src/speech_coach/config.py
+src/speech_coach/models.py
+src/speech_coach/playbook.py
+src/speech_coach/suggestions.py
+src/speech_coach/transcriber.py
+src/speech_coach/ui.py

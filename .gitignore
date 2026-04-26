@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual env
+.venv/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+
+# Env / secrets
+.env
+
+# Models / caches
+*.bin
+*.pt
+*.onnx
+*.model
+*.cache/

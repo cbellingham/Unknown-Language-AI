@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import io
-import wave
 from abc import ABC, abstractmethod
 
 import numpy as np
@@ -19,20 +17,13 @@ class LocalFasterWhisperTranscriber(BaseTranscriber):
         self.model = WhisperModel(model_size, device=device, compute_type=compute_type)
 
     def transcribe_pcm16(self, pcm_bytes: bytes, sample_rate: int) -> str:
-        wav_bytes = self._pcm16_to_wav_bytes(pcm_bytes, sample_rate)
-        segments, _info = self.model.transcribe(io.BytesIO(wav_bytes), vad_filter=False)
+        del sample_rate
+        pcm = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+        segments, _info = self.model.transcribe(pcm, vad_filter=False)
         text = " ".join(segment.text.strip() for segment in segments).strip()
         return text
 
-    @staticmethod
-    def _pcm16_to_wav_bytes(pcm_bytes: bytes, sample_rate: int) -> bytes:
-        buffer = io.BytesIO()
-        with wave.open(buffer, "wb") as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(sample_rate)
-            wf.writeframes(pcm_bytes)
-        return buffer.getvalue()
+
 
 
 class DummyTranscriber(BaseTranscriber):

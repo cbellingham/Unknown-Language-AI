@@ -28,7 +28,7 @@ class AudioSegmenter:
         self.settings = settings
         self.on_utterance = on_utterance
         self.on_frame = on_frame
-        self.audio_queue: "queue.Queue[bytes]" = queue.Queue()
+        self.audio_queue: "queue.Queue[bytes]" = queue.Queue(maxsize=settings.max_audio_queue_frames)
         self.vad = webrtcvad.Vad(settings.vad_aggressiveness)
         self.running = False
 
@@ -44,7 +44,18 @@ class AudioSegmenter:
             del frames, time_info
             if status:
                 print(status)
-            self.audio_queue.put(bytes(indata))
+            frame = bytes(indata)
+            try:
+                self.audio_queue.put_nowait(frame)
+            except queue.Full:
+                try:
+                    self.audio_queue.get_nowait()
+                except queue.Empty:
+                    pass
+                try:
+                    self.audio_queue.put_nowait(frame)
+                except queue.Full:
+                    return
 
         with sd.RawInputStream(
             samplerate=self.settings.sample_rate,

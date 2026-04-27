@@ -6,7 +6,7 @@ import threading
 import time
 from collections import deque
 from concurrent.futures import Future
-from typing import NoReturn
+from typing import NoReturn, TypeVar
 
 from .audio import AudioSegmenter
 from .config import Settings
@@ -15,6 +15,9 @@ from .playbook import Playbook
 from .suggestions import InstantSuggestionEngine, LLMRefinementEngine
 from .transcriber import LocalFasterWhisperTranscriber
 from .ui import TerminalUI
+
+
+TQueueItem = TypeVar("TQueueItem")
 
 
 class SpeechCoachApp:
@@ -34,8 +37,8 @@ class SpeechCoachApp:
             model=self.settings.openai_model,
             max_suggestions=self.settings.max_suggestions,
         )
-        self.utterance_queue: "queue.Queue[bytes]" = queue.Queue()
-        self.frame_queue: "queue.Queue[tuple[bytes, bool]]" = queue.Queue()
+        self.utterance_queue: "queue.Queue[bytes]" = queue.Queue(maxsize=self.settings.max_utterance_queue)
+        self.frame_queue: "queue.Queue[tuple[bytes, bool]]" = queue.Queue(maxsize=self.settings.max_frame_queue)
         self.segmenter = AudioSegmenter(
             self.settings,
             self._enqueue_utterance,
@@ -46,11 +49,29 @@ class SpeechCoachApp:
         self.current_request_id = 0
         self.current_llm_future: Future[tuple[list[str], str]] | None = None
 
+    @staticmethod
+    def _offer_latest(target_queue: "queue.Queue[TQueueItem]", item: TQueueItem) -> None:
+        try:
+            target_queue.put_nowait(item)
+            return
+        except queue.Full:
+            pass
+
+        try:
+            target_queue.get_nowait()
+        except queue.Empty:
+            pass
+
+        try:
+            target_queue.put_nowait(item)
+        except queue.Full:
+            return
+
     def _enqueue_utterance(self, utterance: bytes) -> None:
-        self.utterance_queue.put(utterance)
+        self._offer_latest(self.utterance_queue, utterance)
 
     def _enqueue_frame(self, frame: bytes, is_speech: bool) -> None:
-        self.frame_queue.put((frame, is_speech))
+        self._offer_latest(self.frame_queue, (frame, is_speech))
 
     def start(self) -> None:
         if not self.settings.openai_api_key:
@@ -145,30 +166,37 @@ class SpeechCoachApp:
         relevant,
         local_suggestions: list[str],
     ) -> None:
-        time.sleep(self.settings.llm_debounce_ms / 1000)
         with self.request_lock:
             self.current_request_id += 1
             request_id = self.current_request_id
-            if self.current_llm_future and not self.current_llm_future.done():
-                self.current_llm_future.cancel()
-            transcript_slice = self.state.transcript[-self.settings.max_history_turns :]
-            future = self.llm_refiner.suggest_async(transcript_slice, latest_text, relevant, local_suggestions)
-            self.current_llm_future = future
 
-        def apply_result() -> None:
-            try:
-                suggestions, reason = future.result()
-            except Exception:
-                return
+        def delayed_schedule() -> None:
+            time.sleep(self.settings.llm_debounce_ms / 1000)
             with self.request_lock:
                 if request_id != self.current_request_id:
                     return
-            self.state.latest_suggestions = suggestions
-            self.state.latest_reason = reason
-            self.state.suggestion_source = "ai-refined"
-            self.state.status = "listening"
+                if self.current_llm_future and not self.current_llm_future.done():
+                    self.current_llm_future.cancel()
+                transcript_slice = self.state.transcript[-self.settings.max_history_turns :]
+                future = self.llm_refiner.suggest_async(transcript_slice, latest_text, relevant, local_suggestions)
+                self.current_llm_future = future
 
-        threading.Thread(target=apply_result, daemon=True).start()
+            def apply_result() -> None:
+                try:
+                    suggestions, reason = future.result()
+                except Exception:
+                    return
+                with self.request_lock:
+                    if request_id != self.current_request_id:
+                        return
+                self.state.latest_suggestions = suggestions
+                self.state.latest_reason = reason
+                self.state.suggestion_source = "ai-refined"
+                self.state.status = "listening"
+
+            threading.Thread(target=apply_result, daemon=True).start()
+
+        threading.Thread(target=delayed_schedule, daemon=True).start()
 
 
 def main() -> NoReturn:
